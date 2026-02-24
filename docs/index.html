@@ -15,53 +15,27 @@ body {
 }
 .header { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
 .header h1 { font-size: 1.5rem; color: #fff; }
-
-.board-container {
-  position: relative;
-  width: min(92vw, 400px);
-  height: min(92vw, 400px);
-}
-.board-container img {
-  width: 100%; height: 100%;
-  border-radius: 4px;
-}
-/* SVG arrows overlay */
-.arrows-overlay {
-  position: absolute; top: 0; left: 0;
-  width: 100%; height: 100%;
-  pointer-events: none;
-}
-
+.board-container { width: min(92vw, 400px); height: min(92vw, 400px); }
+.board-container svg { width: 100%; height: 100%; }
 .explanation {
   max-width: 400px; width: 100%; margin-top: 16px;
   padding: 14px 18px; background: #16213e; border-radius: 12px;
   font-size: 1rem; line-height: 1.6; color: #ddd; text-align: center;
 }
-.move-info {
-  margin-top: 10px; font-size: .85rem; color: #888;
-}
-.legend {
-  display: flex; gap: 16px; margin-top: 12px; font-size: .9rem;
-}
+.move-info { margin-top: 10px; font-size: .85rem; color: #888; }
+.legend { display: flex; gap: 16px; margin-top: 12px; font-size: .9rem; }
 .legend span { display: flex; align-items: center; gap: 4px; }
-.dot-red { width: 12px; height: 12px; background: #e94560; border-radius: 50%; }
-.dot-green { width: 12px; height: 12px; background: #4ade80; border-radius: 50%; }
+.dot-red { width: 12px; height: 12px; background: #e94560; border-radius: 50%; display: inline-block; }
+.dot-green { width: 12px; height: 12px; background: #4ade80; border-radius: 50%; display: inline-block; }
 </style>
 </head>
 <body>
-
 <div class="header"><span style="font-size:1.6rem">♟️</span><h1>ChessCoach</h1></div>
-
-<div class="board-container" id="boardContainer">
-  <img id="boardImg" alt="Position">
-  <svg class="arrows-overlay" id="arrowsSvg" viewBox="0 0 800 800"></svg>
-</div>
-
+<div class="board-container" id="boardContainer"></div>
 <div class="legend" id="legend" style="display:none">
   <span><span class="dot-red"></span> Coup joué</span>
   <span><span class="dot-green"></span> Bon coup</span>
 </div>
-
 <div class="explanation" id="explanation" style="display:none"></div>
 <div class="move-info" id="moveInfo"></div>
 
@@ -75,64 +49,105 @@ const good = P.get('good') || '';
 const explanationText = decodeURIComponent(P.get('explanation') || '');
 const orientation = P.get('orientation') || 'white';
 
-// Board image from Lichess
-const boardUrl = `https://lichess1.org/export/fen.gif?fen=${encodeURIComponent(fen)}&color=${orientation}&theme=brown&piece=cburnett`;
-document.getElementById('boardImg').src = boardUrl;
-document.getElementById('boardImg').onerror = function() {
-  // Fallback: use chessboardimage.com
-  this.src = `https://www.chess.com/dynboard?fen=${encodeURIComponent(fen.split(' ')[0])}&board=brown&piece=neo&size=3`;
+// Unicode pieces
+const PIECES = {
+  'K': '♔', 'Q': '♕', 'R': '♖', 'B': '♗', 'N': '♘', 'P': '♙',
+  'k': '♚', 'q': '♛', 'r': '♜', 'b': '♝', 'n': '♞', 'p': '♟'
 };
 
-// Draw arrows
-function fileToX(f) { return orientation === 'white' ? f * 100 + 50 : (7 - f) * 100 + 50; }
-function rankToY(r) { return orientation === 'white' ? (7 - r) * 100 + 50 : r * 100 + 50; }
-
-function squareToCoords(sq) {
-  const file = sq.charCodeAt(0) - 97;
-  const rank = parseInt(sq[1]) - 1;
-  return [fileToX(file), rankToY(rank)];
+// Parse FEN to 8x8 board
+function parseFen(fen) {
+  const board = [];
+  const rows = fen.split(' ')[0].split('/');
+  for (let r = 0; r < 8; r++) {
+    board[r] = [];
+    let c = 0;
+    for (const ch of rows[r]) {
+      if (ch >= '1' && ch <= '8') { for (let i = 0; i < parseInt(ch); i++) board[r][c++] = ''; }
+      else board[r][c++] = ch;
+    }
+  }
+  return board;
 }
 
-function drawArrow(svg, from, to, color) {
-  const [x1, y1] = squareToCoords(from);
-  const [x2, y2] = squareToCoords(to);
-  
+// Square colors
+const LIGHT = '#f0d9b5';
+const DARK = '#b58863';
+
+function fileToX(f) { return orientation === 'white' ? f : 7 - f; }
+function rankToY(r) { return orientation === 'white' ? r : 7 - r; }
+
+function algToCoords(sq) {
+  const f = sq.charCodeAt(0) - 97;
+  const r = 8 - parseInt(sq[1]);
+  return [fileToX(f) * 100 + 50, rankToY(r) * 100 + 50];
+}
+
+// Build SVG
+const board = parseFen(fen);
+let svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800">';
+
+// Draw squares
+for (let r = 0; r < 8; r++) {
+  for (let c = 0; c < 8; c++) {
+    const x = fileToX(c) * 100;
+    const y = rankToY(r) * 100;
+    const color = (r + c) % 2 === 0 ? LIGHT : DARK;
+    svg += `<rect x="${x}" y="${y}" width="100" height="100" fill="${color}"/>`;
+  }
+}
+
+// Draw coordinates
+const files = 'abcdefgh';
+for (let i = 0; i < 8; i++) {
+  const fx = fileToX(i) * 100 + 90;
+  const ry = rankToY(i) * 100 + 16;
+  const fileLabel = files[i];
+  const rankLabel = orientation === 'white' ? 8 - i : i + 1;
+  const cFile = i % 2 === 0 ? DARK : LIGHT;
+  const cRank = i % 2 === 0 ? LIGHT : DARK;
+  svg += `<text x="${fx}" y="795" fill="${cFile}" font-size="14" font-family="sans-serif" text-anchor="end">${fileLabel}</text>`;
+  svg += `<text x="5" y="${ry}" fill="${cRank}" font-size="14" font-family="sans-serif">${rankLabel}</text>`;
+}
+
+// Draw pieces
+for (let r = 0; r < 8; r++) {
+  for (let c = 0; c < 8; c++) {
+    const piece = board[r][c];
+    if (!piece) continue;
+    const x = fileToX(c) * 100 + 50;
+    const y = rankToY(r) * 100 + 65;
+    const isWhite = piece === piece.toUpperCase();
+    // White pieces: white fill with black stroke; Black pieces: black fill
+    const fill = isWhite ? '#fff' : '#333';
+    const stroke = isWhite ? '#333' : '#000';
+    svg += `<text x="${x}" y="${y}" fill="${fill}" stroke="${stroke}" stroke-width="0.5" font-size="68" text-anchor="middle" font-family="serif">${PIECES[piece]}</text>`;
+  }
+}
+
+// Draw arrows
+function drawArrow(from, to, color) {
+  const [x1, y1] = algToCoords(from);
+  const [x2, y2] = algToCoords(to);
   const dx = x2 - x1, dy = y2 - y1;
   const len = Math.sqrt(dx*dx + dy*dy);
   const ux = dx/len, uy = dy/len;
-  
-  // Shorten arrow
-  const sx = x1 + ux * 15, sy = y1 + uy * 15;
-  const ex = x2 - ux * 15, ey = y2 - uy * 15;
-  
-  // Arrow head
-  const headLen = 22;
-  const hx = ex - ux * headLen, hy = ey - uy * headLen;
+  const sx = x1 + ux*10, sy = y1 + uy*10;
+  const ex = x2 - ux*10, ey = y2 - uy*10;
+  const headLen = 25;
+  const hx = ex - ux*headLen, hy = ey - uy*headLen;
   const px = -uy, py = ux;
-  
   const c = color === 'red' ? '#e94560' : '#4ade80';
-  const opacity = 0.85;
-  
-  // Line
-  const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-  line.setAttribute('x1', sx); line.setAttribute('y1', sy);
-  line.setAttribute('x2', hx); line.setAttribute('y2', hy);
-  line.setAttribute('stroke', c); line.setAttribute('stroke-width', 18);
-  line.setAttribute('stroke-linecap', 'round'); line.setAttribute('opacity', opacity);
-  svg.appendChild(line);
-  
-  // Arrowhead
-  const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
-  const pts = `${ex},${ey} ${hx + px*18},${hy + py*18} ${hx - px*18},${hy - py*18}`;
-  poly.setAttribute('points', pts);
-  poly.setAttribute('fill', c); poly.setAttribute('opacity', opacity);
-  svg.appendChild(poly);
+  svg += `<line x1="${sx}" y1="${sy}" x2="${hx}" y2="${hy}" stroke="${c}" stroke-width="16" stroke-linecap="round" opacity="0.85"/>`;
+  svg += `<polygon points="${ex},${ey} ${hx+px*16},${hy+py*16} ${hx-px*16},${hy-py*16}" fill="${c}" opacity="0.85"/>`;
 }
 
-const svg = document.getElementById('arrowsSvg');
-if (bad && bad.length >= 4) drawArrow(svg, bad.slice(0,2), bad.slice(2,4), 'red');
-if (good && good.length >= 4) drawArrow(svg, good.slice(0,2), good.slice(2,4), 'green');
+if (good && good.length >= 4) drawArrow(good.slice(0,2), good.slice(2,4), 'green');
+if (bad && bad.length >= 4) drawArrow(bad.slice(0,2), bad.slice(2,4), 'red');
 if (bad || good) document.getElementById('legend').style.display = 'flex';
+
+svg += '</svg>';
+document.getElementById('boardContainer').innerHTML = svg;
 
 // Explanation
 if (explanationText) {
