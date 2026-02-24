@@ -247,8 +247,8 @@ function render() {
   
   // Arrows at error move
   if (currentPly === errorMoveNum - 1 || (errorMoveNum === 0 && !pgnRaw)) {
-    if (goodMove && goodMove.length >= 4) drawArrowSvg(goodMove.slice(0,2), goodMove.slice(2,4), '#4ade80');
-    if (badMove && badMove.length >= 4) drawArrowSvg(badMove.slice(0,2), badMove.slice(2,4), '#e94560');
+    if (goodMove && goodMove.length >= 4) svg += drawArrowSvg(goodMove.slice(0,2), goodMove.slice(2,4), '#4ade80');
+    if (badMove && badMove.length >= 4) svg += drawArrowSvg(badMove.slice(0,2), badMove.slice(2,4), '#e94560');
   }
   
   svg += '</svg>';
@@ -277,8 +277,8 @@ function drawArrowSvg(from, to, color) {
   const ex = x2-ux*12, ey = y2-uy*12;
   const hl = 24, px = -uy, py = ux;
   const hx = ex-ux*hl, hy = ey-uy*hl;
-  svg += `<line x1="${sx}" y1="${sy}" x2="${hx}" y2="${hy}" stroke="${color}" stroke-width="15" stroke-linecap="round" opacity="0.82"/>`;
-  svg += `<polygon points="${ex},${ey} ${hx+px*15},${hy+py*15} ${hx-px*15},${hy-py*15}" fill="${color}" opacity="0.82"/>`;
+  return `<line x1="${sx}" y1="${sy}" x2="${hx}" y2="${hy}" stroke="${color}" stroke-width="15" stroke-linecap="round" opacity="0.82"/>` +
+         `<polygon points="${ex},${ey} ${hx+px*15},${hy+py*15} ${hx-px*15},${hy-py*15}" fill="${color}" opacity="0.82"/>`;
 }
 
 function parseFen(fen) {
