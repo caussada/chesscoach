@@ -5,9 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>ChessCoach</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
-<link rel="stylesheet" href="https://unpkg.com/chessground@9.1.1/dist/chessground.base.css">
-<link rel="stylesheet" href="https://unpkg.com/chessground@9.1.1/dist/chessground.brown.css">
-<link rel="stylesheet" href="https://unpkg.com/chessground@9.1.1/dist/chessground.cburnett.css">
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body {
@@ -16,128 +13,138 @@ body {
   display: flex; flex-direction: column; align-items: center;
   min-height: 100vh; padding: 12px;
 }
-.header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
-.header h1 { font-size: 1.4rem; color: #fff; }
+.header { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
+.header h1 { font-size: 1.5rem; color: #fff; }
 
-/* CRITICAL: chessground needs explicit dimensions on container AND board */
-#board {
-  width: min(90vw, 400px);
-  height: min(90vw, 400px);
+.board-container {
   position: relative;
+  width: min(92vw, 400px);
+  height: min(92vw, 400px);
 }
-cg-container {
-  width: 100% !important;
-  height: 100% !important;
-  display: block;
-  position: relative;
+.board-container img {
+  width: 100%; height: 100%;
+  border-radius: 4px;
 }
-cg-board {
-  width: 100% !important;
-  height: 100% !important;
-  position: absolute !important;
-  top: 0; left: 0;
-}
-cg-board piece {
-  will-change: transform;
+/* SVG arrows overlay */
+.arrows-overlay {
+  position: absolute; top: 0; left: 0;
+  width: 100%; height: 100%;
+  pointer-events: none;
 }
 
 .explanation {
   max-width: 400px; width: 100%; margin-top: 16px;
-  padding: 12px 16px; background: #16213e; border-radius: 10px;
-  font-size: 0.95rem; line-height: 1.5; color: #ccc; text-align: center;
+  padding: 14px 18px; background: #16213e; border-radius: 12px;
+  font-size: 1rem; line-height: 1.6; color: #ddd; text-align: center;
 }
-.explanation .bad { color: #e94560; font-weight: bold; }
-.explanation .good { color: #4ade80; font-weight: bold; }
-.nav { display: flex; gap: 10px; margin-top: 14px; }
-.nav button {
-  background: #0f3460; color: #fff; border: none; border-radius: 8px;
-  padding: 10px 20px; font-size: 1rem; cursor: pointer;
+.move-info {
+  margin-top: 10px; font-size: .85rem; color: #888;
 }
-.nav button:hover { background: #e94560; }
-.nav button:disabled { opacity: .35; cursor: default; background: #0f3460; }
-.move-info { margin-top: 8px; font-size: .85rem; color: #888; }
+.legend {
+  display: flex; gap: 16px; margin-top: 12px; font-size: .9rem;
+}
+.legend span { display: flex; align-items: center; gap: 4px; }
+.dot-red { width: 12px; height: 12px; background: #e94560; border-radius: 50%; }
+.dot-green { width: 12px; height: 12px; background: #4ade80; border-radius: 50%; }
 </style>
 </head>
 <body>
+
 <div class="header"><span style="font-size:1.6rem">♟️</span><h1>ChessCoach</h1></div>
-<div id="board"></div>
-<div class="explanation" id="explanation" style="display:none"></div>
-<div class="move-info" id="moveInfo"></div>
-<div class="nav" id="nav" style="display:none">
-  <button id="btnStart">⏮</button>
-  <button id="btnPrev">◀</button>
-  <button id="btnNext">▶</button>
-  <button id="btnEnd">⏭</button>
+
+<div class="board-container" id="boardContainer">
+  <img id="boardImg" alt="Position">
+  <svg class="arrows-overlay" id="arrowsSvg" viewBox="0 0 800 800"></svg>
 </div>
 
-<script type="module">
-import { Chessground } from 'https://unpkg.com/chessground@9.1.1/dist/chessground.min.js';
+<div class="legend" id="legend" style="display:none">
+  <span><span class="dot-red"></span> Coup joué</span>
+  <span><span class="dot-green"></span> Bon coup</span>
+</div>
 
-/* --- Telegram WebApp --- */
+<div class="explanation" id="explanation" style="display:none"></div>
+<div class="move-info" id="moveInfo"></div>
+
+<script>
 try { window.Telegram?.WebApp?.ready(); window.Telegram?.WebApp?.expand(); } catch(e) {}
 
-/* --- URL Params --- */
 const P = new URLSearchParams(location.search);
-const startFen = (P.get('fen') || 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1').replace(/\+/g, ' ');
+const fen = (P.get('fen') || 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1').replace(/\+/g, ' ');
 const bad = P.get('bad') || '';
 const good = P.get('good') || '';
 const explanationText = decodeURIComponent(P.get('explanation') || '');
 const orientation = P.get('orientation') || 'white';
 
-/* --- Build arrows --- */
-const shapes = [];
-if (bad && bad.length >= 4) shapes.push({ orig: bad.slice(0,2), dest: bad.slice(2,4), brush: 'red' });
-if (good && good.length >= 4) shapes.push({ orig: good.slice(0,2), dest: good.slice(2,4), brush: 'green' });
+// Board image from Lichess
+const boardUrl = `https://lichess1.org/export/fen.gif?fen=${encodeURIComponent(fen)}&color=${orientation}&theme=brown&piece=cburnett`;
+document.getElementById('boardImg').src = boardUrl;
+document.getElementById('boardImg').onerror = function() {
+  // Fallback: use chessboardimage.com
+  this.src = `https://www.chess.com/dynboard?fen=${encodeURIComponent(fen.split(' ')[0])}&board=brown&piece=neo&size=3`;
+};
 
-/* --- FEN → piece map for chessground --- */
-function fenToPieces(fen) {
-  const pieces = new Map();
-  const rows = fen.split(' ')[0].split('/');
-  const colorMap = { 'p':'black','r':'black','n':'black','b':'black','q':'black','k':'black',
-                     'P':'white','R':'white','N':'white','B':'white','Q':'white','K':'white' };
-  const roleMap = { 'p':'pawn','r':'rook','n':'knight','b':'bishop','q':'queen','k':'king',
-                    'P':'pawn','R':'rook','N':'knight','B':'bishop','Q':'queen','K':'king' };
-  for (let r = 0; r < 8; r++) {
-    let c = 0;
-    for (const ch of rows[r]) {
-      if (ch >= '1' && ch <= '8') { c += parseInt(ch); }
-      else {
-        const file = 'abcdefgh'[c];
-        const rank = String(8 - r);
-        pieces.set(file + rank, { color: colorMap[ch], role: roleMap[ch.toLowerCase()] });
-        c++;
-      }
-    }
-  }
-  return pieces;
+// Draw arrows
+function fileToX(f) { return orientation === 'white' ? f * 100 + 50 : (7 - f) * 100 + 50; }
+function rankToY(r) { return orientation === 'white' ? (7 - r) * 100 + 50 : r * 100 + 50; }
+
+function squareToCoords(sq) {
+  const file = sq.charCodeAt(0) - 97;
+  const rank = parseInt(sq[1]) - 1;
+  return [fileToX(file), rankToY(rank)];
 }
 
-/* --- Init Board --- */
-const cg = Chessground(document.getElementById('board'), {
-  fen: startFen,
-  orientation: orientation,
-  viewOnly: true,
-  coordinates: true,
-  drawable: {
-    enabled: false,
-    visible: true,
-    autoShapes: shapes
-  },
-  animation: { enabled: true, duration: 300 }
-});
+function drawArrow(svg, from, to, color) {
+  const [x1, y1] = squareToCoords(from);
+  const [x2, y2] = squareToCoords(to);
+  
+  const dx = x2 - x1, dy = y2 - y1;
+  const len = Math.sqrt(dx*dx + dy*dy);
+  const ux = dx/len, uy = dy/len;
+  
+  // Shorten arrow
+  const sx = x1 + ux * 15, sy = y1 + uy * 15;
+  const ex = x2 - ux * 15, ey = y2 - uy * 15;
+  
+  // Arrow head
+  const headLen = 22;
+  const hx = ex - ux * headLen, hy = ey - uy * headLen;
+  const px = -uy, py = ux;
+  
+  const c = color === 'red' ? '#e94560' : '#4ade80';
+  const opacity = 0.85;
+  
+  // Line
+  const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+  line.setAttribute('x1', sx); line.setAttribute('y1', sy);
+  line.setAttribute('x2', hx); line.setAttribute('y2', hy);
+  line.setAttribute('stroke', c); line.setAttribute('stroke-width', 18);
+  line.setAttribute('stroke-linecap', 'round'); line.setAttribute('opacity', opacity);
+  svg.appendChild(line);
+  
+  // Arrowhead
+  const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+  const pts = `${ex},${ey} ${hx + px*18},${hy + py*18} ${hx - px*18},${hy - py*18}`;
+  poly.setAttribute('points', pts);
+  poly.setAttribute('fill', c); poly.setAttribute('opacity', opacity);
+  svg.appendChild(poly);
+}
 
-/* --- Explanation --- */
+const svg = document.getElementById('arrowsSvg');
+if (bad && bad.length >= 4) drawArrow(svg, bad.slice(0,2), bad.slice(2,4), 'red');
+if (good && good.length >= 4) drawArrow(svg, good.slice(0,2), good.slice(2,4), 'green');
+if (bad || good) document.getElementById('legend').style.display = 'flex';
+
+// Explanation
 if (explanationText) {
   const el = document.getElementById('explanation');
   el.style.display = 'block';
   el.innerHTML = explanationText;
 }
 
-/* --- Move info --- */
-const turn = startFen.split(' ')[1] === 'w' ? 'Blancs' : 'Noirs';
-const moveNum = startFen.split(' ')[5] || '?';
+// Move info
+const turn = fen.split(' ')[1] === 'w' ? 'Blancs' : 'Noirs';
+const moveNum = fen.split(' ')[5] || '?';
 document.getElementById('moveInfo').textContent = `Coup ${moveNum} — Trait aux ${turn}`;
-
 </script>
 </body>
 </html>
