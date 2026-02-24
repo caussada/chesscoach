@@ -19,14 +19,26 @@ body {
 .header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
 .header h1 { font-size: 1.4rem; color: #fff; }
 
-/* CRITICAL: chessground needs explicit width+height on both wrapper and cg-wrap */
+/* CRITICAL: chessground needs explicit dimensions on container AND board */
 #board {
   width: min(90vw, 400px);
   height: min(90vw, 400px);
+  position: relative;
 }
-cg-wrap {
+cg-container {
   width: 100% !important;
   height: 100% !important;
+  display: block;
+  position: relative;
+}
+cg-board {
+  width: 100% !important;
+  height: 100% !important;
+  position: absolute !important;
+  top: 0; left: 0;
+}
+cg-board piece {
+  will-change: transform;
 }
 
 .explanation {
