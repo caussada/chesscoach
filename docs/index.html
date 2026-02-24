@@ -5,63 +5,287 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>ChessCoach</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body {
   background: #1a1a2e; color: #e0e0e0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   display: flex; flex-direction: column; align-items: center;
-  min-height: 100vh; padding: 12px;
+  min-height: 100vh; padding: 10px;
+  user-select: none; -webkit-user-select: none;
 }
-.header { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
-.header h1 { font-size: 1.5rem; color: #fff; }
-.board-container { width: min(92vw, 400px); height: min(92vw, 400px); }
+.header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.header h1 { font-size: 1.4rem; color: #fff; }
+
+.board-container {
+  width: min(92vw, 400px); height: min(92vw, 400px);
+  position: relative; touch-action: none;
+}
 .board-container svg { width: 100%; height: 100%; }
-.explanation {
-  max-width: 400px; width: 100%; margin-top: 16px;
-  padding: 14px 18px; background: #16213e; border-radius: 12px;
-  font-size: 1rem; line-height: 1.6; color: #ddd; text-align: center;
+
+.moves-list {
+  max-width: 400px; width: 100%; margin-top: 10px;
+  padding: 8px 12px; background: #16213e; border-radius: 10px;
+  font-size: .85rem; line-height: 1.8; color: #aaa;
+  max-height: 120px; overflow-y: auto;
+  display: flex; flex-wrap: wrap; gap: 2px 4px;
 }
-.move-info { margin-top: 10px; font-size: .85rem; color: #888; }
-.legend { display: flex; gap: 16px; margin-top: 12px; font-size: .9rem; }
+.moves-list .move-num { color: #666; margin-right: 2px; }
+.moves-list .move { cursor: pointer; padding: 1px 4px; border-radius: 4px; color: #ccc; }
+.moves-list .move:hover { background: #0f3460; }
+.moves-list .move.active { background: #e94560; color: #fff; font-weight: bold; }
+.moves-list .move.error-move { color: #e94560; text-decoration: underline; }
+
+.nav { display: flex; gap: 8px; margin-top: 10px; }
+.nav button {
+  background: #0f3460; color: #fff; border: none; border-radius: 8px;
+  padding: 10px 18px; font-size: 1.1rem; cursor: pointer;
+  transition: background .15s;
+}
+.nav button:hover { background: #e94560; }
+.nav button:disabled { opacity: .3; cursor: default; background: #0f3460; }
+
+.explanation {
+  max-width: 400px; width: 100%; margin-top: 10px;
+  padding: 12px 16px; background: #16213e; border-radius: 10px;
+  font-size: .95rem; line-height: 1.5; color: #ddd; text-align: center;
+  display: none;
+}
+
+.legend { display: flex; gap: 16px; margin-top: 8px; font-size: .85rem; display: none; }
 .legend span { display: flex; align-items: center; gap: 4px; }
-.dot-red { width: 12px; height: 12px; background: #e94560; border-radius: 50%; display: inline-block; }
-.dot-green { width: 12px; height: 12px; background: #4ade80; border-radius: 50%; display: inline-block; }
+.dot-red { width: 10px; height: 10px; background: #e94560; border-radius: 50%; display: inline-block; }
+.dot-green { width: 10px; height: 10px; background: #4ade80; border-radius: 50%; display: inline-block; }
+
+.move-info { margin-top: 6px; font-size: .82rem; color: #666; }
+
+.selected-square { fill: rgba(255,255,0,0.4) !important; }
+.legal-dot { fill: rgba(0,0,0,0.15); }
+.last-move { fill: rgba(155,199,0,0.41) !important; }
 </style>
 </head>
 <body>
-<div class="header"><span style="font-size:1.6rem">♟️</span><h1>ChessCoach</h1></div>
+<div class="header"><span style="font-size:1.5rem">♟️</span><h1>ChessCoach</h1></div>
 <div class="board-container" id="boardContainer"></div>
-<div class="legend" id="legend" style="display:none">
+<div class="legend" id="legend">
   <span><span class="dot-red"></span> Coup joué</span>
   <span><span class="dot-green"></span> Bon coup</span>
 </div>
-<div class="explanation" id="explanation" style="display:none"></div>
+<div class="nav">
+  <button id="btnStart" onclick="goTo(0)">⏮</button>
+  <button id="btnPrev" onclick="goTo(currentPly-1)">◀</button>
+  <button id="btnNext" onclick="goTo(currentPly+1)">▶</button>
+  <button id="btnEnd" onclick="goTo(positions.length-1)">⏭</button>
+  <button id="btnFlip" onclick="flipBoard()" style="margin-left:8px">🔄</button>
+</div>
+<div class="moves-list" id="movesList"></div>
+<div class="explanation" id="explanation"></div>
 <div class="move-info" id="moveInfo"></div>
 
 <script>
 try { window.Telegram?.WebApp?.ready(); window.Telegram?.WebApp?.expand(); } catch(e) {}
 
+/* --- URL Params --- */
 const P = new URLSearchParams(location.search);
-const fen = (P.get('fen') || 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1').replace(/\+/g, ' ');
-const bad = P.get('bad') || '';
-const good = P.get('good') || '';
+const pgnRaw = P.get('pgn') || '';
+const errorMoveNum = parseInt(P.get('move')) || 0; // ply number of the error
+const badMove = P.get('bad') || '';
+const goodMove = P.get('good') || '';
 const explanationText = decodeURIComponent(P.get('explanation') || '');
-const orientation = P.get('orientation') || 'white';
+const startFen = (P.get('fen') || '').replace(/\+/g, ' ');
+let orientation = P.get('orientation') || 'white';
 
-// Unicode pieces
-const PIECES = {
-  'K': '♔', 'Q': '♕', 'R': '♖', 'B': '♗', 'N': '♘', 'P': '♙',
-  'k': '♚', 'q': '♛', 'r': '♜', 'b': '♝', 'n': '♞', 'p': '♟'
+/* --- Piece Unicode --- */
+const PIECE_CHAR = {
+  'K':'♔','Q':'♕','R':'♖','B':'♗','N':'♘','P':'♙',
+  'k':'♚','q':'♛','r':'♜','b':'♝','n':'♞','p':'♟'
 };
 
-// Parse FEN to 8x8 board
+const LIGHT = '#f0d9b5', DARK = '#b58863';
+
+/* --- Game State --- */
+let game = new Chess();
+let positions = []; // array of FEN at each ply
+let sanMoves = [];  // SAN moves
+let currentPly = 0;
+let selectedSq = null;
+let legalMoves = [];
+let lastMove = null; // {from, to}
+
+/* --- Load PGN or FEN --- */
+function initGame() {
+  if (pgnRaw) {
+    // Clean PGN: remove clock annotations, result
+    let cleanPgn = pgnRaw
+      .replace(/\{[^}]*\}/g, '')
+      .replace(/\[.*?\]\s*/g, '')
+      .replace(/\d+\.\.\./g, '')
+      .trim();
+    
+    // Extract moves
+    const moveTokens = cleanPgn
+      .replace(/1-0|0-1|1\/2-1\/2|\*/g, '')
+      .replace(/\d+\.\s*/g, ' ')
+      .trim().split(/\s+/).filter(Boolean);
+    
+    game.reset();
+    positions = [game.fen()];
+    sanMoves = [];
+    
+    for (const m of moveTokens) {
+      const result = game.move(m);
+      if (result) {
+        sanMoves.push(result.san);
+        positions.push(game.fen());
+      }
+    }
+  } else if (startFen) {
+    game.load(startFen);
+    positions = [game.fen()];
+    sanMoves = [];
+  } else {
+    positions = [game.fen()];
+    sanMoves = [];
+  }
+}
+
+initGame();
+
+/* --- Build moves list --- */
+function buildMovesList() {
+  const el = document.getElementById('movesList');
+  if (sanMoves.length === 0) { el.style.display = 'none'; return; }
+  let html = '';
+  for (let i = 0; i < sanMoves.length; i++) {
+    if (i % 2 === 0) html += `<span class="move-num">${Math.floor(i/2)+1}.</span>`;
+    const isError = (i + 1) === errorMoveNum;
+    html += `<span class="move${isError ? ' error-move' : ''}" data-ply="${i+1}" onclick="goTo(${i+1})">${sanMoves[i]}</span>`;
+  }
+  el.innerHTML = html;
+}
+buildMovesList();
+
+/* --- Coordinate helpers --- */
+function fileToX(f) { return orientation === 'white' ? f : 7 - f; }
+function rankToY(r) { return orientation === 'white' ? r : 7 - r; }
+function algToXY(sq) {
+  const f = sq.charCodeAt(0) - 97;
+  const r = 8 - parseInt(sq[1]);
+  return [fileToX(f), rankToY(r)];
+}
+function xyToAlg(gx, gy) {
+  const f = orientation === 'white' ? gx : 7 - gx;
+  const r = orientation === 'white' ? gy : 7 - gy;
+  return String.fromCharCode(97 + f) + (8 - r);
+}
+
+/* --- Render Board --- */
+function render() {
+  const fen = positions[currentPly];
+  game.load(fen);
+  const board = parseFen(fen);
+  
+  let svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800">';
+  
+  // Squares
+  for (let r = 0; r < 8; r++) {
+    for (let c = 0; c < 8; c++) {
+      const x = fileToX(c) * 100, y = rankToY(r) * 100;
+      let color = (r + c) % 2 === 0 ? LIGHT : DARK;
+      const sq = String.fromCharCode(97+c) + (8-r);
+      svg += `<rect x="${x}" y="${y}" width="100" height="100" fill="${color}" data-sq="${sq}"/>`;
+    }
+  }
+  
+  // Last move highlight
+  if (lastMove) {
+    for (const sq of [lastMove.from, lastMove.to]) {
+      const [gx, gy] = algToXY(sq);
+      svg += `<rect x="${gx*100}" y="${gy*100}" width="100" height="100" fill="rgba(155,199,0,0.41)" data-sq="${sq}"/>`;
+    }
+  }
+  
+  // Selected square highlight
+  if (selectedSq) {
+    const [sx, sy] = algToXY(selectedSq);
+    svg += `<rect x="${sx*100}" y="${sy*100}" width="100" height="100" fill="rgba(255,255,0,0.4)"/>`;
+    // Legal move dots
+    for (const m of legalMoves) {
+      const [mx, my] = algToXY(m.to);
+      const hasPiece = board[8-parseInt(m.to[1])][m.to.charCodeAt(0)-97];
+      if (hasPiece) {
+        svg += `<circle cx="${mx*100+50}" cy="${my*100+50}" r="45" fill="none" stroke="rgba(0,0,0,0.15)" stroke-width="8"/>`;
+      } else {
+        svg += `<circle cx="${mx*100+50}" cy="${my*100+50}" r="16" fill="rgba(0,0,0,0.15)"/>`;
+      }
+    }
+  }
+  
+  // Coordinates
+  const files = 'abcdefgh';
+  for (let i = 0; i < 8; i++) {
+    const fi = orientation === 'white' ? i : 7-i;
+    const ri = orientation === 'white' ? i : 7-i;
+    const cF = (7+i) % 2 === 0 ? LIGHT : DARK;
+    const cR = i % 2 === 0 ? LIGHT : DARK;
+    svg += `<text x="${i*100+90}" y="795" fill="${cF}" font-size="13" font-family="sans-serif" text-anchor="end">${files[fi]}</text>`;
+    svg += `<text x="4" y="${i*100+16}" fill="${cR}" font-size="13" font-family="sans-serif">${8-ri}</text>`;
+  }
+  
+  // Pieces
+  for (let r = 0; r < 8; r++) {
+    for (let c = 0; c < 8; c++) {
+      const piece = board[r][c];
+      if (!piece) continue;
+      const x = fileToX(c) * 100 + 50, y = rankToY(r) * 100 + 65;
+      const isW = piece === piece.toUpperCase();
+      const sq = String.fromCharCode(97+c) + (8-r);
+      svg += `<text x="${x}" y="${y}" fill="${isW?'#fff':'#333'}" stroke="${isW?'#333':'#111'}" stroke-width="${isW?'0.5':'0'}" font-size="66" text-anchor="middle" font-family="serif" data-sq="${sq}" style="cursor:pointer">${PIECE_CHAR[piece]}</text>`;
+    }
+  }
+  
+  // Arrows at error move
+  if (currentPly === errorMoveNum - 1 || (errorMoveNum === 0 && !pgnRaw)) {
+    if (goodMove && goodMove.length >= 4) drawArrowSvg(goodMove.slice(0,2), goodMove.slice(2,4), '#4ade80');
+    if (badMove && badMove.length >= 4) drawArrowSvg(badMove.slice(0,2), badMove.slice(2,4), '#e94560');
+  }
+  
+  svg += '</svg>';
+  document.getElementById('boardContainer').innerHTML = svg;
+  
+  // Attach click handlers
+  document.getElementById('boardContainer').querySelector('svg').addEventListener('click', onBoardClick);
+  document.getElementById('boardContainer').querySelector('svg').addEventListener('touchstart', onBoardTouch, {passive:false});
+  
+  // Update UI
+  updateMoveHighlight();
+  updateButtons();
+  updateExplanation();
+  updateMoveInfo();
+}
+
+function drawArrowSvg(from, to, color) {
+  const [x1r, y1r] = algToXY(from);
+  const x1 = x1r*100+50, y1 = y1r*100+50;
+  const [x2r, y2r] = algToXY(to);
+  const x2 = x2r*100+50, y2 = y2r*100+50;
+  const dx = x2-x1, dy = y2-y1;
+  const len = Math.sqrt(dx*dx+dy*dy);
+  const ux = dx/len, uy = dy/len;
+  const sx = x1+ux*10, sy = y1+uy*10;
+  const ex = x2-ux*12, ey = y2-uy*12;
+  const hl = 24, px = -uy, py = ux;
+  const hx = ex-ux*hl, hy = ey-uy*hl;
+  svg += `<line x1="${sx}" y1="${sy}" x2="${hx}" y2="${hy}" stroke="${color}" stroke-width="15" stroke-linecap="round" opacity="0.82"/>`;
+  svg += `<polygon points="${ex},${ey} ${hx+px*15},${hy+py*15} ${hx-px*15},${hy-py*15}" fill="${color}" opacity="0.82"/>`;
+}
+
 function parseFen(fen) {
   const board = [];
   const rows = fen.split(' ')[0].split('/');
   for (let r = 0; r < 8; r++) {
-    board[r] = [];
-    let c = 0;
+    board[r] = []; let c = 0;
     for (const ch of rows[r]) {
       if (ch >= '1' && ch <= '8') { for (let i = 0; i < parseInt(ch); i++) board[r][c++] = ''; }
       else board[r][c++] = ch;
@@ -70,96 +294,156 @@ function parseFen(fen) {
   return board;
 }
 
-// Square colors
-const LIGHT = '#f0d9b5';
-const DARK = '#b58863';
-
-function fileToX(f) { return orientation === 'white' ? f : 7 - f; }
-function rankToY(r) { return orientation === 'white' ? r : 7 - r; }
-
-function algToCoords(sq) {
-  const f = sq.charCodeAt(0) - 97;
-  const r = 8 - parseInt(sq[1]);
-  return [fileToX(f) * 100 + 50, rankToY(r) * 100 + 50];
+/* --- Interaction --- */
+function getSqFromEvent(e) {
+  const svgEl = document.getElementById('boardContainer').querySelector('svg');
+  const rect = svgEl.getBoundingClientRect();
+  const x = (e.clientX || e.touches?.[0]?.clientX) - rect.left;
+  const y = (e.clientY || e.touches?.[0]?.clientY) - rect.top;
+  const gx = Math.floor(x / rect.width * 8);
+  const gy = Math.floor(y / rect.height * 8);
+  if (gx < 0 || gx > 7 || gy < 0 || gy > 7) return null;
+  return xyToAlg(gx, gy);
 }
 
-// Build SVG
-const board = parseFen(fen);
-let svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800">';
+function onBoardClick(e) { handleInteraction(e); }
+function onBoardTouch(e) { e.preventDefault(); handleInteraction(e); }
 
-// Draw squares
-for (let r = 0; r < 8; r++) {
-  for (let c = 0; c < 8; c++) {
-    const x = fileToX(c) * 100;
-    const y = rankToY(r) * 100;
-    const color = (r + c) % 2 === 0 ? LIGHT : DARK;
-    svg += `<rect x="${x}" y="${y}" width="100" height="100" fill="${color}"/>`;
+function handleInteraction(e) {
+  // Only allow moves at current end of navigation
+  const sq = getSqFromEvent(e);
+  if (!sq) return;
+  
+  game.load(positions[currentPly]);
+  const piece = game.get(sq);
+  const turn = game.turn();
+  
+  if (selectedSq) {
+    // Try to make a move
+    const move = legalMoves.find(m => m.to === sq);
+    if (move) {
+      // Check for promotion
+      let promo = undefined;
+      if (move.flags.includes('p')) promo = 'q'; // auto-queen for now
+      const result = game.move({from: selectedSq, to: sq, promotion: promo});
+      if (result) {
+        // Truncate future moves if we're not at the end
+        if (currentPly < positions.length - 1) {
+          positions.length = currentPly + 1;
+          sanMoves.length = currentPly;
+        }
+        sanMoves.push(result.san);
+        positions.push(game.fen());
+        lastMove = {from: selectedSq, to: sq};
+        currentPly++;
+        selectedSq = null; legalMoves = [];
+        buildMovesList();
+        render();
+        return;
+      }
+    }
+    // Clicked own piece? Reselect
+    if (piece && ((turn === 'w' && piece.color === 'w') || (turn === 'b' && piece.color === 'b'))) {
+      selectedSq = sq;
+      legalMoves = game.moves({square: sq, verbose: true});
+      render();
+      return;
+    }
+    // Deselect
+    selectedSq = null; legalMoves = [];
+    render();
+    return;
+  }
+  
+  // Select a piece
+  if (piece && ((turn === 'w' && piece.color === 'w') || (turn === 'b' && piece.color === 'b'))) {
+    selectedSq = sq;
+    legalMoves = game.moves({square: sq, verbose: true});
+    render();
   }
 }
 
-// Draw coordinates
-const files = 'abcdefgh';
-for (let i = 0; i < 8; i++) {
-  const fx = fileToX(i) * 100 + 90;
-  const ry = rankToY(i) * 100 + 16;
-  const fileLabel = files[i];
-  const rankLabel = orientation === 'white' ? 8 - i : i + 1;
-  const cFile = i % 2 === 0 ? DARK : LIGHT;
-  const cRank = i % 2 === 0 ? LIGHT : DARK;
-  svg += `<text x="${fx}" y="795" fill="${cFile}" font-size="14" font-family="sans-serif" text-anchor="end">${fileLabel}</text>`;
-  svg += `<text x="5" y="${ry}" fill="${cRank}" font-size="14" font-family="sans-serif">${rankLabel}</text>`;
-}
-
-// Draw pieces
-for (let r = 0; r < 8; r++) {
-  for (let c = 0; c < 8; c++) {
-    const piece = board[r][c];
-    if (!piece) continue;
-    const x = fileToX(c) * 100 + 50;
-    const y = rankToY(r) * 100 + 65;
-    const isWhite = piece === piece.toUpperCase();
-    // White pieces: white fill with black stroke; Black pieces: black fill
-    const fill = isWhite ? '#fff' : '#333';
-    const stroke = isWhite ? '#333' : '#000';
-    svg += `<text x="${x}" y="${y}" fill="${fill}" stroke="${stroke}" stroke-width="0.5" font-size="68" text-anchor="middle" font-family="serif">${PIECES[piece]}</text>`;
+/* --- Navigation --- */
+function goTo(ply) {
+  if (ply < 0 || ply >= positions.length) return;
+  currentPly = ply;
+  selectedSq = null; legalMoves = [];
+  // Set last move
+  if (ply > 0) {
+    const prevGame = new Chess(); prevGame.load(positions[ply-1]);
+    // Find the move that transitions positions[ply-1] -> positions[ply]
+    const moves = prevGame.moves({verbose:true});
+    for (const m of moves) {
+      prevGame.load(positions[ply-1]);
+      const r = prevGame.move(m);
+      if (r && prevGame.fen() === positions[ply]) {
+        lastMove = {from: m.from, to: m.to};
+        break;
+      }
+    }
+  } else {
+    lastMove = null;
   }
+  render();
+  // Scroll move into view
+  const activeEl = document.querySelector('.move.active');
+  if (activeEl) activeEl.scrollIntoView({block:'nearest'});
 }
 
-// Draw arrows
-function drawArrow(from, to, color) {
-  const [x1, y1] = algToCoords(from);
-  const [x2, y2] = algToCoords(to);
-  const dx = x2 - x1, dy = y2 - y1;
-  const len = Math.sqrt(dx*dx + dy*dy);
-  const ux = dx/len, uy = dy/len;
-  const sx = x1 + ux*10, sy = y1 + uy*10;
-  const ex = x2 - ux*10, ey = y2 - uy*10;
-  const headLen = 25;
-  const hx = ex - ux*headLen, hy = ey - uy*headLen;
-  const px = -uy, py = ux;
-  const c = color === 'red' ? '#e94560' : '#4ade80';
-  svg += `<line x1="${sx}" y1="${sy}" x2="${hx}" y2="${hy}" stroke="${c}" stroke-width="16" stroke-linecap="round" opacity="0.85"/>`;
-  svg += `<polygon points="${ex},${ey} ${hx+px*16},${hy+py*16} ${hx-px*16},${hy-py*16}" fill="${c}" opacity="0.85"/>`;
+function flipBoard() {
+  orientation = orientation === 'white' ? 'black' : 'white';
+  render();
 }
 
-if (good && good.length >= 4) drawArrow(good.slice(0,2), good.slice(2,4), 'green');
-if (bad && bad.length >= 4) drawArrow(bad.slice(0,2), bad.slice(2,4), 'red');
-if (bad || good) document.getElementById('legend').style.display = 'flex';
+function updateMoveHighlight() {
+  document.querySelectorAll('.move').forEach(el => {
+    el.classList.toggle('active', parseInt(el.dataset.ply) === currentPly);
+  });
+}
 
-svg += '</svg>';
-document.getElementById('boardContainer').innerHTML = svg;
+function updateButtons() {
+  document.getElementById('btnStart').disabled = currentPly === 0;
+  document.getElementById('btnPrev').disabled = currentPly === 0;
+  document.getElementById('btnNext').disabled = currentPly >= positions.length - 1;
+  document.getElementById('btnEnd').disabled = currentPly >= positions.length - 1;
+}
 
-// Explanation
-if (explanationText) {
+function updateExplanation() {
   const el = document.getElementById('explanation');
-  el.style.display = 'block';
-  el.innerHTML = explanationText;
+  const legendEl = document.getElementById('legend');
+  if (explanationText && (currentPly === errorMoveNum - 1 || (errorMoveNum === 0 && !pgnRaw))) {
+    el.style.display = 'block';
+    el.innerHTML = explanationText;
+    if (badMove || goodMove) legendEl.style.display = 'flex';
+  } else {
+    el.style.display = 'none';
+    legendEl.style.display = 'none';
+  }
 }
 
-// Move info
-const turn = fen.split(' ')[1] === 'w' ? 'Blancs' : 'Noirs';
-const moveNum = fen.split(' ')[5] || '?';
-document.getElementById('moveInfo').textContent = `Coup ${moveNum} — Trait aux ${turn}`;
+function updateMoveInfo() {
+  const fen = positions[currentPly];
+  const turn = fen.split(' ')[1] === 'w' ? 'Blancs' : 'Noirs';
+  const moveNum = fen.split(' ')[5] || '1';
+  const plyText = currentPly > 0 ? ` (coup ${currentPly}/${positions.length-1})` : '';
+  document.getElementById('moveInfo').textContent = `Trait aux ${turn}${plyText}`;
+}
+
+/* --- Keyboard navigation --- */
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowLeft') goTo(currentPly - 1);
+  else if (e.key === 'ArrowRight') goTo(currentPly + 1);
+  else if (e.key === 'Home') goTo(0);
+  else if (e.key === 'End') goTo(positions.length - 1);
+  else if (e.key === 'f' || e.key === 'F') flipBoard();
+});
+
+/* --- Initial render --- */
+if (errorMoveNum > 0 && errorMoveNum <= positions.length) {
+  goTo(errorMoveNum - 1); // Go to position just before the error
+} else {
+  render();
+}
 </script>
 </body>
 </html>
