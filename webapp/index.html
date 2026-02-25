@@ -125,6 +125,55 @@ body {
   .eval-bar { display: flex !important; }
   .eval-bar-h { display: none !important; }
 }
+
+/* Quiz mode styles */
+.quiz-panel {
+  max-width: 440px; width: 100%; margin-top: 8px;
+}
+.quiz-card {
+  background: #16213e; border-radius: 10px; padding: 14px 16px;
+  margin-bottom: 6px; border-left: 4px solid #f0c040;
+}
+.quiz-card .quiz-title {
+  font-size: 1.05rem; font-weight: bold; color: #f0c040; margin-bottom: 4px;
+}
+.quiz-card .quiz-subtitle {
+  font-size: .85rem; color: #ccc; margin-bottom: 8px;
+}
+.quiz-card .quiz-attempts {
+  font-size: .75rem; color: #888; margin-top: 6px;
+}
+.quiz-card .quiz-msg {
+  font-size: .9rem; margin-top: 8px; min-height: 1.2em;
+}
+.quiz-card .quiz-msg.correct { color: #4ade80; }
+.quiz-card .quiz-msg.wrong { color: #e94560; }
+
+.quiz-btn {
+  background: #0f3460; color: #fff; border: none; border-radius: 8px;
+  padding: 8px 16px; font-size: .9rem; cursor: pointer; margin-top: 6px; margin-right: 6px;
+  transition: background .15s;
+}
+.quiz-btn:hover { background: #e94560; }
+
+.sources-card {
+  background: #1a2744; border-radius: 10px; padding: 14px 16px;
+  margin-bottom: 6px; border-left: 4px solid #60a5fa; display: none;
+}
+.sources-card .sources-title {
+  font-size: .95rem; font-weight: bold; color: #60a5fa; margin-bottom: 6px;
+}
+.sources-card .sources-body {
+  font-size: .85rem; color: #ccc; line-height: 1.5; white-space: pre-wrap;
+}
+
+.board-flash {
+  animation: boardFlashRed 0.5s ease;
+}
+@keyframes boardFlashRed {
+  0% { box-shadow: inset 0 0 0 6px rgba(233,69,96,0.8); }
+  100% { box-shadow: inset 0 0 0 0 rgba(233,69,96,0); }
+}
 </style>
 </head>
 <body>
@@ -175,6 +224,25 @@ body {
   </div>
 </div>
 
+<div class="quiz-panel" id="quizPanel" style="display:none">
+  <div class="quiz-card">
+    <div class="quiz-title">♟️ Quiz — Trouve le meilleur coup !</div>
+    <div class="quiz-subtitle" id="quizSubtitle"></div>
+    <div class="quiz-msg" id="quizMsg"></div>
+    <div class="quiz-attempts" id="quizAttempts"></div>
+    <div id="quizButtons">
+      <button class="quiz-btn" id="btnSeeError" onclick="seeError()">👁️ Voir l'erreur</button>
+    </div>
+    <div id="quizSuccessButtons" style="display:none">
+      <button class="quiz-btn" id="btnReplay" onclick="replayFromGood()">▶️ Voir la suite</button>
+    </div>
+  </div>
+  <div class="sources-card" id="sourcesCard">
+    <div class="sources-title">📚 Pourquoi c'est mieux</div>
+    <div class="sources-body" id="sourcesBody"></div>
+  </div>
+</div>
+
 <div class="move-info" id="moveInfo"></div>
 
 <script>
@@ -188,6 +256,11 @@ const badMove = P.get('bad') || '';
 const goodMove = P.get('good') || '';
 const explanationText = decodeURIComponent(P.get('explanation') || '');
 const startFen = (P.get('fen') || '').replace(/\+/g, ' ');
+const quizMode = P.get('quiz') === 'true';
+const quizAnswer = P.get('answer') || '';
+const errorLine = P.get('errorLine') || '';
+const costParam = P.get('cost') || '';
+const sourcesText = decodeURIComponent(P.get('sources') || P.get('explanation') || '');
 // Auto-detect orientation: if player param is set and played Black, flip board
 const playerParam = (P.get('player') || '').toLowerCase();
 let orientation = P.get('orientation') || 'white';
@@ -448,10 +521,16 @@ function render() {
     }
   }
 
-  // Arrows at error move
-  if (currentPly === errorMoveNum - 1 || (errorMoveNum === 0 && !pgnRaw)) {
-    if (goodMove && goodMove.length >= 4) svg += drawArrowSvg(goodMove.slice(0,2), goodMove.slice(2,4), '#4ade80');
-    if (badMove && badMove.length >= 4) svg += drawArrowSvg(badMove.slice(0,2), badMove.slice(2,4), '#e94560');
+  // Arrows at error move (hidden in quiz mode until solved)
+  if (!(quizMode && !quizSolved)) {
+    if (currentPly === errorMoveNum - 1 || (errorMoveNum === 0 && !pgnRaw)) {
+      if (goodMove && goodMove.length >= 4) svg += drawArrowSvg(goodMove.slice(0,2), goodMove.slice(2,4), '#4ade80');
+      if (badMove && badMove.length >= 4) svg += drawArrowSvg(badMove.slice(0,2), badMove.slice(2,4), '#e94560');
+    }
+  }
+  // In quiz mode, show green arrow for answer after solving
+  if (quizMode && quizSolved && quizAnswer.length >= 4) {
+    svg += drawArrowSvg(quizAnswer.slice(0,2), quizAnswer.slice(2,4), '#4ade80');
   }
 
   svg += '</svg>';
@@ -522,6 +601,12 @@ function handleInteraction(e) {
     if (move) {
       let promo = undefined;
       if (move.flags.includes('p')) promo = 'q';
+      // Quiz mode intercept
+      if (quizMode && !quizSolved) {
+        const ok = quizHandleMove(selectedSq, sq, promo);
+        selectedSq = null; legalMoves = [];
+        return;
+      }
       const result = game.move({from: selectedSq, to: sq, promotion: promo});
       if (result) {
         if (currentPly < positions.length - 1) { positions.length = currentPly + 1; sanMoves.length = currentPly; }
@@ -541,6 +626,8 @@ function handleInteraction(e) {
   }
 
   if (piece && ((turn === 'w' && piece.color === 'w') || (turn === 'b' && piece.color === 'b'))) {
+    // In quiz mode, don't allow interaction if solved (unless replaying) or if animating error
+    if (quizMode && !quizSolved && errorAnimating) return;
     selectedSq = sq; legalMoves = game.moves({square: sq, verbose: true}); render();
   }
 }
@@ -574,6 +661,7 @@ function updateButtons() {
 function updateExplanation() {
   const cardError = document.getElementById('cardError');
   const cardGood = document.getElementById('cardGood');
+  if (quizMode) { cardError.style.display = 'none'; cardGood.style.display = 'none'; return; }
   const showCards = currentPly === errorMoveNum - 1 || (errorMoveNum === 0 && !pgnRaw);
 
   if (showCards && explanationText) {
@@ -601,6 +689,10 @@ function updateMoveInfo() {
 
 /* --- Keyboard navigation --- */
 document.addEventListener('keydown', e => {
+  if (quizMode && !quizSolved) {
+    if (e.key === 'f' || e.key === 'F') flipBoard();
+    return;
+  }
   if (e.key === 'ArrowLeft') goTo(currentPly - 1);
   else if (e.key === 'ArrowRight') goTo(currentPly + 1);
   else if (e.key === 'Home') goTo(0);
@@ -608,12 +700,152 @@ document.addEventListener('keydown', e => {
   else if (e.key === 'f' || e.key === 'F') flipBoard();
 });
 
+/* --- Quiz Mode --- */
+let quizSolved = false;
+let quizAttempts = 0;
+let quizBasePly = 0; // the ply where the quiz position is
+let errorAnimating = false;
+let errorAnimationPly = 0;
+
+function initQuiz() {
+  if (!quizMode) return;
+  // Hide nav buttons except flip
+  document.getElementById('btnStart').style.display = 'none';
+  document.getElementById('btnPrev').style.display = 'none';
+  document.getElementById('btnNext').style.display = 'none';
+  document.getElementById('btnEnd').style.display = 'none';
+  // Hide analysis panel (eval + engine) until solved
+  document.querySelector('.analysis-panel').style.display = 'none';
+  // Hide eval bars
+  document.getElementById('evalBar').style.display = 'none';
+  document.getElementById('evalBarH').style.display = 'none';
+  // Show quiz panel
+  document.getElementById('quizPanel').style.display = 'block';
+  if (costParam) {
+    document.getElementById('quizSubtitle').textContent = 'Cette erreur t\'a coûté ' + costParam + 'cp';
+  }
+  quizBasePly = currentPly;
+  updateQuizAttempts();
+}
+
+function updateQuizAttempts() {
+  if (quizAttempts > 0) {
+    document.getElementById('quizAttempts').textContent = 'Tentative ' + quizAttempts + '/...';
+  }
+}
+
+function quizHandleMove(from, to, promo) {
+  const uci = from + to;
+  quizAttempts++;
+  updateQuizAttempts();
+  if (uci === quizAnswer) {
+    // CORRECT
+    quizSolved = true;
+    document.getElementById('quizMsg').className = 'quiz-msg correct';
+    document.getElementById('quizMsg').textContent = '🎉 Bravo ! C\'est le bon coup !';
+    document.getElementById('btnSeeError').style.display = 'none';
+    document.getElementById('quizSuccessButtons').style.display = 'block';
+    // Show eval
+    document.querySelector('.analysis-panel').style.display = '';
+    document.getElementById('evalBar').style.display = '';
+    document.getElementById('evalBarH').style.display = '';
+    // Show sources
+    if (sourcesText) {
+      document.getElementById('sourcesCard').style.display = 'block';
+      document.getElementById('sourcesBody').textContent = sourcesText;
+    }
+    // Actually make the move
+    game.load(positions[currentPly]);
+    const result = game.move({from, to, promotion: promo});
+    if (result) {
+      if (currentPly < positions.length - 1) { positions.length = currentPly + 1; sanMoves.length = currentPly; }
+      sanMoves.push(result.san);
+      positions.push(game.fen());
+      lastMove = {from, to};
+      currentPly++;
+    }
+    render();
+    return true;
+  } else {
+    // WRONG
+    document.getElementById('quizMsg').className = 'quiz-msg wrong';
+    document.getElementById('quizMsg').textContent = '❌ Ce n\'est pas le meilleur coup. Réessaie !';
+    // Flash board
+    const bc = document.getElementById('boardContainer');
+    bc.classList.remove('board-flash');
+    void bc.offsetWidth;
+    bc.classList.add('board-flash');
+    setTimeout(() => bc.classList.remove('board-flash'), 500);
+    // Reset position
+    selectedSq = null; legalMoves = [];
+    render();
+    return false;
+  }
+}
+
+function seeError() {
+  if (!errorLine) return;
+  const moves = errorLine.split(',');
+  errorAnimating = true;
+  errorAnimationPly = 0;
+  // Save current position
+  const savedPly = currentPly;
+  const g = new Chess(positions[quizBasePly]);
+
+  document.getElementById('btnSeeError').style.display = 'none';
+  const backBtn = document.createElement('button');
+  backBtn.className = 'quiz-btn';
+  backBtn.textContent = '↩️ Revenir';
+  backBtn.onclick = function() {
+    errorAnimating = false;
+    // Restore positions to original
+    positions.length = quizBasePly + 1;
+    sanMoves.length = quizBasePly;
+    currentPly = quizBasePly;
+    lastMove = null;
+    backBtn.remove();
+    document.getElementById('btnSeeError').style.display = '';
+    document.getElementById('quizMsg').textContent = '';
+    render();
+  };
+  document.getElementById('quizButtons').appendChild(backBtn);
+
+  let i = 0;
+  function playNext() {
+    if (i >= moves.length || !errorAnimating) return;
+    const uci = moves[i].trim();
+    if (uci.length < 4) return;
+    const from = uci.slice(0,2), to = uci.slice(2,4), promo = uci[4] || undefined;
+    const r = g.move({from, to, promotion: promo});
+    if (!r) return;
+    // Extend positions
+    if (currentPly < positions.length - 1) { positions.length = currentPly + 1; sanMoves.length = currentPly; }
+    sanMoves.push(r.san);
+    positions.push(g.fen());
+    lastMove = {from, to};
+    currentPly++;
+    render();
+    i++;
+    if (i < moves.length) setTimeout(playNext, 1000);
+  }
+  playNext();
+}
+
+function replayFromGood() {
+  // Just enable navigation from the solved position
+  document.getElementById('btnNext').style.display = '';
+  document.getElementById('btnEnd').style.display = '';
+  document.getElementById('btnPrev').style.display = '';
+  document.getElementById('btnStart').style.display = '';
+}
+
 /* --- Initial render --- */
 if (errorMoveNum > 0 && errorMoveNum <= positions.length) {
   goTo(errorMoveNum - 1);
 } else {
   render();
 }
+initQuiz();
 </script>
 </body>
 </html>
