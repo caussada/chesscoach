@@ -96,13 +96,14 @@ const explanationText = decodeURIComponent(P.get('explanation') || '');
 const startFen = (P.get('fen') || '').replace(/\+/g, ' ');
 let orientation = P.get('orientation') || 'white';
 
-/* --- Piece Unicode --- */
-const PIECE_CHAR = {
-  'K':'♔','Q':'♕','R':'♖','B':'♗','N':'♘','P':'♙',
-  'k':'♚','q':'♛','r':'♜','b':'♝','n':'♞','p':'♟'
+/* --- Piece images (Lichess cburnett) --- */
+const PIECE_IMG = {
+  'K':'wK','Q':'wQ','R':'wR','B':'wB','N':'wN','P':'wP',
+  'k':'bK','q':'bQ','r':'bR','b':'bB','n':'bN','p':'bP'
 };
+const PIECE_BASE = 'https://lichess1.org/assets/piece/cburnett/';
 
-const LIGHT = '#f0d9b5', DARK = '#b58863';
+const LIGHT = '#ebecd0', DARK = '#779556';
 
 /* --- Game State --- */
 let game = new Chess();
@@ -202,7 +203,7 @@ function render() {
   if (lastMove) {
     for (const sq of [lastMove.from, lastMove.to]) {
       const [gx, gy] = algToXY(sq);
-      svg += `<rect x="${gx*100}" y="${gy*100}" width="100" height="100" fill="rgba(155,199,0,0.41)" data-sq="${sq}"/>`;
+      svg += `<rect x="${gx*100}" y="${gy*100}" width="100" height="100" fill="rgba(255,255,0,0.35)" data-sq="${sq}"/>`;
     }
   }
   
@@ -233,15 +234,15 @@ function render() {
     svg += `<text x="4" y="${i*100+16}" fill="${cR}" font-size="13" font-family="sans-serif">${8-ri}</text>`;
   }
   
-  // Pieces
+  // Pieces (SVG images)
   for (let r = 0; r < 8; r++) {
     for (let c = 0; c < 8; c++) {
       const piece = board[r][c];
       if (!piece) continue;
-      const x = fileToX(c) * 100 + 50, y = rankToY(r) * 100 + 65;
-      const isW = piece === piece.toUpperCase();
+      const x = fileToX(c) * 100 + 5, y = rankToY(r) * 100 + 5;
       const sq = String.fromCharCode(97+c) + (8-r);
-      svg += `<text x="${x}" y="${y}" fill="${isW?'#fff':'#333'}" stroke="${isW?'#333':'#111'}" stroke-width="${isW?'0.5':'0'}" font-size="66" text-anchor="middle" font-family="serif" data-sq="${sq}" style="cursor:pointer">${PIECE_CHAR[piece]}</text>`;
+      const imgName = PIECE_IMG[piece];
+      svg += `<image href="${PIECE_BASE}${imgName}.svg" x="${x}" y="${y}" width="90" height="90" data-sq="${sq}" style="cursor:pointer"/>`;
     }
   }
   
