@@ -188,7 +188,23 @@ const badMove = P.get('bad') || '';
 const goodMove = P.get('good') || '';
 const explanationText = decodeURIComponent(P.get('explanation') || '');
 const startFen = (P.get('fen') || '').replace(/\+/g, ' ');
+// Auto-detect orientation: if player param is set and played Black, flip board
+const playerParam = (P.get('player') || '').toLowerCase();
 let orientation = P.get('orientation') || 'white';
+if (playerParam && pgnRaw) {
+  // Check PGN headers or detect from raw text
+  const blackMatch = pgnRaw.match(/\[Black\s+"([^"]+)"\]/i);
+  const whiteMatch = pgnRaw.match(/\[White\s+"([^"]+)"\]/i);
+  if (blackMatch && blackMatch[1].toLowerCase() === playerParam) {
+    orientation = 'black';
+  } else if (whiteMatch && whiteMatch[1].toLowerCase() === playerParam) {
+    orientation = 'white';
+  }
+}
+// Also support simple color param: orientation=auto&color=black
+const colorParam = P.get('color');
+if (colorParam === 'black') orientation = 'black';
+if (colorParam === 'white') orientation = 'white';
 
 /* --- Piece images (Lichess cburnett) --- */
 const PIECE_IMG = {
