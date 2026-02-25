@@ -722,7 +722,8 @@ function initQuiz() {
   // Show quiz panel
   document.getElementById('quizPanel').style.display = 'block';
   if (costParam) {
-    document.getElementById('quizSubtitle').textContent = 'Cette erreur t\'a coûté ' + costParam + 'cp';
+    const pawns = (parseInt(costParam) / 100).toFixed(1);
+    document.getElementById('quizSubtitle').textContent = 'Cette erreur t\'a coûté ' + pawns + ' pion' + (parseFloat(pawns) >= 2 ? 's' : '');
   }
   quizBasePly = currentPly;
   updateQuizAttempts();
