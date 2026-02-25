@@ -237,11 +237,10 @@ let currentEval = 0; // in pawns, from white's perspective
 let currentMateIn = null;
 let bestLineSan = '';
 
-try {
-  stockfish = new Worker('https://cdn.jsdelivr.net/npm/stockfish.js@10.0.2/stockfish.js');
+function initStockfishWorker(worker) {
+  stockfish = worker;
   stockfish.postMessage('uci');
   stockfish.postMessage('isready');
-
   stockfish.onmessage = function(e) {
     const line = e.data;
     if (typeof line !== 'string') return;
@@ -280,9 +279,21 @@ try {
       // Final result already shown via info lines
     }
   };
-} catch(e) {
-  document.getElementById('engineBestline').textContent = 'Stockfish non disponible';
 }
+
+// Load Stockfish via blob to avoid cross-origin Worker restriction
+(async function() {
+  try {
+    const resp = await fetch('https://cdn.jsdelivr.net/npm/stockfish.js@10.0.2/stockfish.js');
+    const blob = await resp.blob();
+    const worker = new Worker(URL.createObjectURL(blob));
+    initStockfishWorker(worker);
+    // Trigger initial analysis
+    setTimeout(() => analyzePosition(), 500);
+  } catch(e) {
+    document.getElementById('engineBestline').textContent = 'Stockfish non disponible';
+  }
+})();
 
 function uciLineToSan(uciLine, fen) {
   const moves = uciLine.split(/\s+/);
